@@ -1,0 +1,186 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+export interface VaultDocData {
+  id: string;
+  title: string;
+  firstSeen: string;
+  lastSeen: string;
+  occurrences: number;
+  selfSolved: number;
+  tags: string[];
+  concepts: string[];
+  similar?: string[];
+  explanation: string;
+  rootCause: string;
+  fix: string;
+  diagrams?: Array<{ kind: string; mermaid: string }>;
+  occurrenceLog: Array<{
+    num: number;
+    date: string;
+    project: string;
+    solvedBy: 'AI' | 'User';
+  }>;
+  questions?: string[];
+}
+
+export function getVaultPath(): string {
+  if (process.env.ERRATA_VAULT_PATH) {
+    return path.resolve(process.env.ERRATA_VAULT_PATH);
+  }
+  return path.join(os.homedir(), '.errata', 'vault');
+}
+
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '')
+    .substring(0, 40);
+}
+
+export function ensureVaultDirs(): { vaultDir: string; errorsDir: string; conceptsDir: string } {
+  const vaultDir = getVaultPath();
+  const errorsDir = path.join(vaultDir, 'errors');
+  const conceptsDir = path.join(vaultDir, 'concepts');
+
+  if (!fs.existsSync(/*turbopackIgnore: true*/ vaultDir)) {
+    fs.mkdirSync(vaultDir, { recursive: true });
+  }
+  if (!fs.existsSync(/*turbopackIgnore: true*/ errorsDir)) {
+    fs.mkdirSync(errorsDir, { recursive: true });
+  }
+  if (!fs.existsSync(/*turbopackIgnore: true*/ conceptsDir)) {
+    fs.mkdirSync(conceptsDir, { recursive: true });
+  }
+
+  return { vaultDir, errorsDir, conceptsDir };
+}
+
+export async function writeVaultDoc(data: VaultDocData): Promise<{ docPath: string; fullPath: string }> {
+  const { errorsDir, vaultDir } = ensureVaultDirs();
+
+  const slug = slugify(data.title || data.id);
+  const datePrefix = data.firstSeen.split('T')[0] || new Date().toISOString().split('T')[0];
+  const filename = `${datePrefix}-${slug}.md`;
+  const fullPath = path.join(errorsDir, filename);
+  const relDocPath = path.join('errors', filename);
+
+  // Format Mermaid diagrams
+  let rootCauseDiagram = '```mermaid\nflowchart TD\n    A[Trigger Error] --> B[Root Cause]\n    B --> C[Failure Observed]\n```';
+  let fixDiagram = '```mermaid\nsequenceDiagram\n    User->>System: Apply Fix\n    System-->>User: Verified Resolution\n```';
+
+  if (data.diagrams && data.diagrams.length > 0) {
+    const rc = data.diagrams.find((d) => d.kind === 'root_cause_flow' || d.kind === 'root_cause');
+    if (rc && rc.mermaid) {
+      rootCauseDiagram = `\`\`\`mermaid\n${rc.mermaid.trim()}\n\`\`\``;
+    }
+    const fx = data.diagrams.find((d) => d.kind === 'fix_sequence' || d.kind === 'fix');
+    if (fx && fx.mermaid) {
+      fixDiagram = `\`\`\`mermaid\n${fx.mermaid.trim()}\n\`\`\``;
+    }
+  }
+
+  // Occurrence log table
+  const occLogRows = data.occurrenceLog && data.occurrenceLog.length > 0
+    ? data.occurrenceLog
+        .map(
+          (occ) =>
+            `| ${occ.num} | ${occ.date} | ${occ.project || 'default'} | ${
+              occ.solvedBy === 'User' ? '**Me (Self-Solved)**' : 'AI'
+            } |`
+        )
+        .join('\n')
+    : `| 1 | ${data.lastSeen} | default | ${data.selfSolved > 0 ? '**Me**' : 'AI'} |`;
+
+  // Concept links
+  const conceptWikiLinks = data.concepts.map((c) => `[[${slugify(c)}]]`).join(', ');
+
+  const content = `---
+id: "${data.id}"
+title: "${data.title.replace(/"/g, '\\"')}"
+first_seen: "${data.firstSeen}"
+last_seen: "${data.lastSeen}"
+occurrences: ${data.occurrences}
+self_solved: ${data.selfSolved}
+tags: [${data.tags.map((t) => `"${t}"`).join(', ')}]
+concepts: [${conceptWikiLinks}]
+---
+
+# ${data.title}
+
+## What happened
+${data.explanation || 'Resolution logged via Errata.'}
+
+## Root cause
+${rootCauseDiagram}
+
+> **Summary:** ${data.rootCause || 'Root cause logged by assistant.'}
+
+## The fix
+${fixDiagram}
+
+> **Resolution:** ${data.fix || 'Fix verified and recorded.'}
+
+## Occurrence log
+| # | Date | Project | Solved by |
+|---|------|---------|-----------|
+${occLogRows}
+
+## Learn this
+- [ ] Can you explain what conditions trigger this error?
+- [ ] Can you reproduce the fix without checking the documentation?
+- [ ] How would you prevent this class of error in CI/CD or unit tests?
+`;
+
+  fs.writeFileSync(fullPath, content, 'utf-8');
+
+  // Update vault index.md
+  updateVaultIndex(vaultDir);
+
+  return { docPath: relDocPath, fullPath };
+}
+
+export function updateVaultIndex(vaultDir: string): void {
+  try {
+    const errorsDir = path.join(vaultDir, 'errors');
+    if (!fs.existsSync(/*turbopackIgnore: true*/ errorsDir)) return;
+
+    const files = fs.readdirSync(errorsDir).filter((f) => f.endsWith('.md'));
+    const docLinks = files
+      .map((f) => {
+        const title = f.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-/g, ' ');
+        return `- [[errors/${f}|${title}]]`;
+      })
+      .join('\n');
+
+    const indexContent = `# Errata Knowledge Vault
+
+Total Captured Error Classes: **${files.length}**
+Obsidian & Markdown compatible.
+
+## Documented Error Classes
+${docLinks || '_No errors logged yet._'}
+
+---
+*Generated by Errata Knowledge Engine*
+`;
+
+    fs.writeFileSync(path.join(vaultDir, 'index.md'), indexContent, 'utf-8');
+  } catch {
+    // Non-critical background failure
+  }
+}
+
+export function readVaultDoc(relDocPath: string): string | null {
+  try {
+    const fullPath = path.join(getVaultPath(), relDocPath);
+    if (fs.existsSync(/*turbopackIgnore: true*/ fullPath)) {
+      return fs.readFileSync(fullPath, 'utf-8');
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
