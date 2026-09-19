@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "errata": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "tsx",
+        "/home/aneesh/Desktop/developer/first-commit/bin/errata-mcp.ts"
+      ]
+    }
+  }
+}

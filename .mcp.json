@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "errata": {
+      "command": "npx",
+      "args": ["-y", "tsx", "bin/errata-mcp.ts"]
+    }
+  }
+}
