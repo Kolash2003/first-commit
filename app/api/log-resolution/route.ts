@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { logResolution } from '@/lib/capture';
+import { eventBus } from '@/lib/event-bus';
 
 export async function POST(req: Request) {
   try {
@@ -24,6 +25,17 @@ export async function POST(req: Request) {
       concepts: body.concepts,
       matched_error_class_id: body.matched_error_class_id,
       user_solved_unaided: body.user_solved_unaided,
+    });
+
+    // 🔴 Emit live capture event to SSE subscribers
+    eventBus.emit({
+      type: 'capture',
+      errorClassId: result.error_class_id,
+      title: result.title,
+      occurrenceCount: result.occurrence_count,
+      project: body.project,
+      technologies: body.technology,
+      timestamp: new Date().toISOString(),
     });
 
     return NextResponse.json(result);

@@ -1,14 +1,24 @@
-import dotenv from 'dotenv';
-import path from 'path';
+import { isConfigured, initNeo4jSchema } from './neo4j';
+import { logResolution } from './capture';
+import { eventBus } from './event-bus';
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+export interface DemoErrorDefinition {
+  error_message: string;
+  stack_trace?: string;
+  root_cause: string;
+  fix: string;
+  explanation: string;
+  diagrams?: Array<{ kind: string; mermaid: string }>;
+  technology: string[];
+  files: string[];
+  project: string;
+  concepts: string[];
+  user_solved_unaided: boolean;
+  occurrences: number;
+}
 
-import { initNeo4jSchema, isConfigured } from '../lib/neo4j';
-import { logResolution } from '../lib/capture';
-
-const ERRORS = [
-  // ─── 1. EADDRINUSE ────────────────────────────────────────────────────────
+export const DEMO_ERRORS: DemoErrorDefinition[] = [
+  // 1. EADDRINUSE
   {
     error_message: 'Error: listen EADDRINUSE: address already in use :::3000',
     stack_trace: 'at Server.setupListenHandle [as _listen2] (node:net:1904:16)\n at listenInCluster (node:net:1961:12)\n at doListen (src/server.ts:42:10)',
@@ -47,7 +57,7 @@ const ERRORS = [
     occurrences: 4,
   },
 
-  // ─── 2. React undefined.map ───────────────────────────────────────────────
+  // 2. React undefined.map
   {
     error_message: 'TypeError: Cannot read properties of undefined (reading "map")',
     stack_trace: 'at UserList (src/components/UserList.tsx:14:22)\n at renderWithHooks (node_modules/react-dom:1289)',
@@ -73,7 +83,7 @@ const ERRORS = [
     occurrences: 3,
   },
 
-  // ─── 3. Postgres connection pool exhausted ────────────────────────────────
+  // 3. Postgres connection pool exhausted
   {
     error_message: 'PostgresError: remaining connection slots are reserved for non-replication superuser connections',
     stack_trace: 'at Connection.parseE (node_modules/pg/lib/connection.js:614:13)\n at Client.connect (src/db/pool.ts:28:9)',
@@ -98,7 +108,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 4. CORS blocked ──────────────────────────────────────────────────────
+  // 4. CORS blocked
   {
     error_message: "Access to fetch at 'https://api.myapp.io/users' from origin 'http://localhost:3000' has been blocked by CORS policy",
     stack_trace: 'at XMLHttpRequest.onreadystatechange (src/api/client.ts:34:14)',
@@ -123,7 +133,7 @@ const ERRORS = [
     occurrences: 3,
   },
 
-  // ─── 5. JWT malformed ─────────────────────────────────────────────────────
+  // 5. JWT malformed
   {
     error_message: 'JsonWebTokenError: jwt malformed',
     stack_trace: 'at /node_modules/jsonwebtoken/verify.js:63:21\n at middleware/auth.ts:18:12',
@@ -149,7 +159,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 6. Maximum call stack ────────────────────────────────────────────────
+  // 6. Maximum call stack
   {
     error_message: 'RangeError: Maximum call stack size exceeded',
     stack_trace: 'at flatten (src/utils/tree.ts:12:18)\n at flatten (src/utils/tree.ts:14:22)\n at flatten (src/utils/tree.ts:14:22)',
@@ -177,7 +187,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 7. ETIMEDOUT microservices ───────────────────────────────────────────
+  // 7. ETIMEDOUT microservices
   {
     error_message: 'Error: connect ETIMEDOUT 10.0.1.45:5432',
     stack_trace: 'at TCPConnectWrap.afterConnect (node:net:1300:16)\n at src/services/db.ts:55:10',
@@ -204,7 +214,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 8. fetch not defined Node 17 ─────────────────────────────────────────
+  // 8. fetch not defined Node 17
   {
     error_message: 'ReferenceError: fetch is not defined',
     stack_trace: 'at callAPI (src/services/weather.ts:8:18)\n at Object.<anonymous> (src/index.ts:22:1)',
@@ -230,7 +240,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 9. React hydration mismatch ──────────────────────────────────────────
+  // 9. React hydration mismatch
   {
     error_message: 'Error: Hydration failed because the initial UI does not match what was rendered on the server.',
     stack_trace: 'at throwOnHydrationMismatch (react-dom.development.js:12507:9)\n at app/layout.tsx:23:5',
@@ -256,7 +266,7 @@ const ERRORS = [
     occurrences: 3,
   },
 
-  // ─── 10. npm EACCES ───────────────────────────────────────────────────────
+  // 10. npm EACCES
   {
     error_message: 'npm ERR! code EACCES\nnpm ERR! syscall mkdir\nnpm ERR! path /usr/local/lib/node_modules',
     stack_trace: 'npm ERR! Error: EACCES: permission denied, mkdir /usr/local/lib/node_modules',
@@ -289,7 +299,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 11. Python ModuleNotFoundError ───────────────────────────────────────
+  // 11. Python ModuleNotFoundError
   {
     error_message: "ModuleNotFoundError: No module named 'pandas'",
     stack_trace: 'File "scripts/analyze.py", line 2, in <module>\n    import pandas as pd',
@@ -315,7 +325,7 @@ const ERRORS = [
     occurrences: 2,
   },
 
-  // ─── 12. Git merge conflict ────────────────────────────────────────────────
+  // 12. Git merge conflict
   {
     error_message: 'CONFLICT (content): Merge conflict in src/api/routes.ts\nAutomatic merge failed; fix conflicts and then commit the result.',
     stack_trace: '',
@@ -343,26 +353,28 @@ const ERRORS = [
   },
 ];
 
-async function seed() {
-  console.log('🌱 Seeding Errata Demo Data (12 rich error scenarios)...\n');
-
+export async function seedDemoData(onProgress?: (index: number, total: number, title: string) => void): Promise<{
+  classesCount: number;
+  occurrencesCount: number;
+}> {
   if (isConfigured()) {
-    console.log('✅ Connected to Neo4j. Initializing schema constraints...');
-    await initNeo4jSchema();
-  } else {
-    console.log('⚠️  Neo4j not configured; seeding in-memory store only.');
+    try {
+      await initNeo4jSchema();
+    } catch {
+      // Schema may already exist
+    }
   }
 
-  const idMap: Record<number, string> = {};
+  let totalOccurrences = 0;
 
-  for (let i = 0; i < ERRORS.length; i++) {
-    const e = ERRORS[i];
+  for (let i = 0; i < DEMO_ERRORS.length; i++) {
+    const e = DEMO_ERRORS[i];
     const { occurrences, ...base } = e;
 
     // Seed first occurrence
     const first = await logResolution({ ...base, user_solved_unaided: false });
-    idMap[i] = first.error_class_id;
-    console.log(`[${i + 1}/12] ${first.title}`);
+    totalOccurrences++;
+    onProgress?.(i + 1, DEMO_ERRORS.length, first.title);
 
     // Seed additional occurrences with matched_error_class_id
     for (let occ = 1; occ < occurrences; occ++) {
@@ -371,14 +383,23 @@ async function seed() {
         matched_error_class_id: first.error_class_id,
         user_solved_unaided: occ % 2 === 0, // alternate self-solved
       });
+      totalOccurrences++;
     }
+
+    // Emit live capture event
+    eventBus.emit({
+      type: 'capture',
+      errorClassId: first.error_class_id,
+      title: first.title,
+      occurrenceCount: occurrences,
+      project: base.project,
+      technologies: base.technology,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  console.log('\n✅ Seeding completed! Dashboard now has:');
-  console.log(`   • ${ERRORS.length} error classes`);
-  console.log(`   • ${ERRORS.reduce((sum, e) => sum + e.occurrences, 0)} total occurrences`);
-  console.log(`   • Multiple projects: ${[...new Set(ERRORS.map((e) => e.project))].join(', ')}`);
-  console.log(`   • Technologies: ${[...new Set(ERRORS.flatMap((e) => e.technology))].join(', ')}`);
+  return {
+    classesCount: DEMO_ERRORS.length,
+    occurrencesCount: totalOccurrences,
+  };
 }
-
-seed().catch(console.error);
