@@ -135,7 +135,7 @@ export async function runCypher<T = any>(
   });
 
   try {
-    const result = await session.run(query, params);
+    const result = await session.run(query, toNeo4jParams(params));
     return result.records.map((rec) => {
       const obj: Record<string, any> = {};
       rec.keys.forEach((key) => {
@@ -155,6 +155,18 @@ export async function runCypher<T = any>(
   } finally {
     await session.close();
   }
+}
+
+function toNeo4jParams(params: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [key, val] of Object.entries(params)) {
+    if (typeof val === 'number' && Number.isInteger(val)) {
+      out[key] = neo4j.int(val);
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
 }
 
 function sanitizeNeo4jProps(props: Record<string, any>): Record<string, any> {

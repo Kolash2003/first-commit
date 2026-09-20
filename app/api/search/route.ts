@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get('q')?.trim() ?? '';
-  const limit = Number(req.nextUrl.searchParams.get('limit') ?? '20');
+  const rawLimit = Number(req.nextUrl.searchParams.get('limit') ?? '20');
+  const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.floor(rawLimit))) : 20;
 
   if (!q) {
     return NextResponse.json({ results: [], query: '', count: 0 });
