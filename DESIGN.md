@@ -1,11 +1,3 @@
-# Errata — Design Document
-
-**Status:** Approved for implementation planning
-**Date:** 2026-09-19
-**Working name:** Errata (subject to change)
-
----
-
 ## 1. Problem Statement
 
 Developers increasingly paste errors into AI assistants, accept the fix, and move on — without reading, understanding, or retaining anything. The AI's reasoning evaporates the moment the chat scrolls away. The same developer hits the same class of error weeks later and repeats the cycle, never building the mental model that turns errors into expertise.
