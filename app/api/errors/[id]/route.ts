@@ -67,7 +67,7 @@ export async function GET(
     }
   }
 
-  // Fallback in memory
+
   const mem = inMemoryErrorClasses.get(id);
   if (mem) {
     let docContent = mem.doc_path ? readVaultDoc(mem.doc_path) : null;

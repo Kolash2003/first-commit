@@ -4,10 +4,7 @@ import { inMemoryErrorClasses } from '@/lib/matching';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * GET /api/search?q=<query>&limit=20
- * Hybrid keyword + technology-tag search over error classes.
- */
+
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get('q')?.trim() ?? '';
   const rawLimit = Number(req.nextUrl.searchParams.get('limit') ?? '20');
@@ -21,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (isConfigured()) {
-      // Extract possible technology hints from query (e.g. "react errors" → "react")
+
       const techWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
 
       const rows = await runCypher<any>(`
@@ -53,7 +50,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ results: rows, query: q, count: rows.length });
     }
 
-    // In-memory fallback — simple substring match
+
     const classes = Array.from(inMemoryErrorClasses.values());
     const filtered = classes
       .filter((c) => {

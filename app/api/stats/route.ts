@@ -9,11 +9,11 @@ export async function GET() {
   try {
     const stats = await getStats();
 
-    // --- Heatmap: daily occurrences for last 90 days ---
+
     let dailyOccurrences: Array<{ date: string; count: number }> = [];
-    // --- Radar: per-concept self-solve rate ---
+
     let conceptScores: Array<{ concept: string; selfSolveRate: number; total: number }> = [];
-    // --- Weekly trend ---
+
     let weeklyTrend = { thisWeek: 0, lastWeek: 0, delta: 0 };
 
     const now = new Date();
@@ -23,7 +23,7 @@ export async function GET() {
 
     if (isConfigured()) {
       try {
-        // Daily occurrences from Occurrence nodes
+
         const dailyRows = await runCypher<any>(`
           MATCH (o:Occurrence)
           WHERE o.timestamp >= $cutoff
@@ -32,7 +32,7 @@ export async function GET() {
         `, { cutoff: ninetyDaysAgo });
         dailyOccurrences = dailyRows.map((r) => ({ date: r.date, count: Number(r.count) }));
 
-        // Per-concept self-solve rate
+
         const conceptRows = await runCypher<any>(`
           MATCH (c:Concept)<-[:TEACHES]-(e:ErrorClass)
           RETURN
@@ -48,7 +48,7 @@ export async function GET() {
           total: Number(r.total),
         }));
 
-        // Weekly trend
+
         const weekRows = await runCypher<any>(`
           MATCH (o:Occurrence)
           RETURN
@@ -59,10 +59,10 @@ export async function GET() {
         const lw = weekRows[0]?.lastWeek ?? 0;
         weeklyTrend = { thisWeek: tw, lastWeek: lw, delta: lw > 0 ? Math.round(((tw - lw) / lw) * 100) : 0 };
       } catch {
-        // Extended stats failed gracefully — base stats still returned
+
       }
     } else {
-      // In-memory fallback: build daily from error class timestamps
+
       const classes = Array.from(inMemoryErrorClasses.values());
       const dateMap = new Map<string, number>();
       for (const c of classes) {

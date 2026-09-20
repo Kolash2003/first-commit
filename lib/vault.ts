@@ -67,7 +67,6 @@ export async function writeVaultDoc(data: VaultDocData): Promise<{ docPath: stri
   const fullPath = path.join(errorsDir, filename);
   const relDocPath = path.join('errors', filename);
 
-  // Format Mermaid diagrams
   let rootCauseDiagram = '```mermaid\nflowchart TD\n    A[Trigger Error] --> B[Root Cause]\n    B --> C[Failure Observed]\n```';
   let fixDiagram = '```mermaid\nsequenceDiagram\n    User->>System: Apply Fix\n    System-->>User: Verified Resolution\n```';
 
@@ -82,7 +81,7 @@ export async function writeVaultDoc(data: VaultDocData): Promise<{ docPath: stri
     }
   }
 
-  // Occurrence log table
+
   const occLogRows = data.occurrenceLog && data.occurrenceLog.length > 0
     ? data.occurrenceLog
         .map(
@@ -94,7 +93,6 @@ export async function writeVaultDoc(data: VaultDocData): Promise<{ docPath: stri
         .join('\n')
     : `| 1 | ${data.lastSeen} | default | ${data.selfSolved > 0 ? '**Me**' : 'AI'} |`;
 
-  // Concept links
   const conceptWikiLinks = data.concepts.map((c) => `[[${slugify(c)}]]`).join(', ');
 
   const content = `---
@@ -136,7 +134,6 @@ ${occLogRows}
 
   fs.writeFileSync(fullPath, content, 'utf-8');
 
-  // Update vault index.md
   updateVaultIndex(vaultDir);
 
   return { docPath: relDocPath, fullPath };
@@ -169,7 +166,6 @@ ${docLinks || '_No errors logged yet._'}
 
     fs.writeFileSync(path.join(vaultDir, 'index.md'), indexContent, 'utf-8');
   } catch {
-    // Non-critical background failure
   }
 }
 
@@ -180,7 +176,6 @@ export function readVaultDoc(relDocPath: string): string | null {
       return fs.readFileSync(fullPath, 'utf-8');
     }
   } catch {
-    // Ignore
   }
   return null;
 }

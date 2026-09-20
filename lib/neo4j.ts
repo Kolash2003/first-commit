@@ -1,6 +1,7 @@
 import neo4j, { Driver, Session } from 'neo4j-driver';
+import { EMBEDDING_DIMENSION } from './embeddings';
 
-// Cache driver across hot-reloads in development
+
 declare global {
   var __neo4j_driver: Driver | undefined;
 }
@@ -29,7 +30,7 @@ export function parseNeo4jConfig(): Neo4jConfig {
         database: database || process.env.NEO4J_DATABASE || 'neo4j',
       };
     } catch {
-      // Fall through if URL parsing fails
+
     }
   }
 
@@ -63,7 +64,7 @@ export function getNeo4jDriver(): Driver | null {
     : undefined;
 
   const driver = neo4j.driver(config.uri, auth, {
-    maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
+    maxConnectionLifetime: 3 * 60 * 60 * 1000,
     maxConnectionPoolSize: 50,
     connectionAcquisitionTimeout: 10000,
   });
@@ -141,7 +142,7 @@ export async function runCypher<T = any>(
       rec.keys.forEach((key) => {
         const k = String(key);
         const val = rec.get(key);
-        // Handle Neo4j Integers
+
         if (neo4j.isInt(val)) {
           obj[k] = val.toNumber();
         } else if (val && typeof val === 'object' && 'properties' in val) {
@@ -207,12 +208,11 @@ export async function initNeo4jSchema(): Promise<{ initialized: boolean; logs: s
     }
   }
 
-  // Vector index creation (Neo4j 5.x+)
   const vectorIndexCypher = `
     CREATE VECTOR INDEX error_class_embeddings IF NOT EXISTS
     FOR (e:ErrorClass) ON (e.embedding)
     OPTIONS { indexConfig: {
-      \`vector.dimensions\`: 384,
+      \`vector.dimensions\`: ${EMBEDDING_DIMENSION},
       \`vector.similarity_function\`: 'cosine'
     }}
   `;

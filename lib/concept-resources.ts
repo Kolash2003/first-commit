@@ -1,8 +1,4 @@
-/**
- * concept-resources.ts
- * Static map of concept names → curated learning resources.
- * Used to surface links and TTS explanations in the Vault's error detail view.
- */
+
 
 export interface ConceptResource {
   title: string;

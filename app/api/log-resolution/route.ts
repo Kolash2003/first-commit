@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       user_solved_unaided: body.user_solved_unaided,
     });
 
-    // 🔴 Emit live capture event to SSE subscribers
+
     eventBus.emit({
       type: 'capture',
       errorClassId: result.error_class_id,

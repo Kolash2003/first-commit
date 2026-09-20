@@ -47,7 +47,7 @@ export async function GET() {
         };
       }
     } catch {
-      // Ignore count fetch errors
+
     }
   }
 

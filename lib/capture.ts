@@ -58,7 +58,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
     title = `${norm.errorType.toUpperCase()}: ${title}`;
   }
 
-  // Generate doc path in advance
   const datePrefix = now.split('T')[0];
   const docPath = `errors/${datePrefix}-${errorClassId}.md`;
 
@@ -73,7 +72,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
 
   if (isConfigured()) {
     try {
-      // 1. Fetch existing ErrorClass if any to preserve first_seen and update occurrence count
       const existing = await runCypher<any>(
         `MATCH (e:ErrorClass { id: $id }) RETURN e LIMIT 1`,
         { id: errorClassId }
@@ -87,7 +85,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
         title = e.title || title;
       }
 
-      // 2. Fetch past occurrences for doc log
       const pastOccs = await runCypher<any>(
         `MATCH (o:Occurrence)-[:INSTANCE_OF]->(e:ErrorClass { id: $id })
          RETURN o.timestamp AS timestamp, o.project AS project, o.user_solved_unaided AS user_solved
@@ -113,7 +110,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
         });
       }
 
-      // 3. Persist to Neo4j
       const cypher = `
         MERGE (e:ErrorClass { id: $id })
         ON CREATE SET
@@ -196,7 +192,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
       console.error('Error executing Neo4j capture transaction:', err);
     }
   } else {
-    // In-memory fallback
     const existing = inMemoryErrorClasses.get(errorClassId);
     if (existing) {
       occurrenceCount = existing.occurrence_count + 1;
@@ -220,7 +215,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
     });
   }
 
-  // Write or update the Markdown + Mermaid vault documentation
   try {
     await writeVaultDoc({
       id: errorClassId,

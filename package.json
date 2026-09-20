@@ -13,6 +13,7 @@
     "seed": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1136.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "dotenv": "^18.0.1",
     "lucide-react": "^1.47.0",

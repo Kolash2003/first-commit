@@ -15,7 +15,6 @@ async function testMcpLoop() {
 
   const testErrorMsg = 'Error: listen EADDRINUSE: address already in use :::4000';
 
-  // Step 1: Initial check should yield no match (first time seen)
   console.log('\n1. Checking error for the first time...');
   const firstCheck = await matchError({
     error_message: testErrorMsg,
@@ -23,7 +22,6 @@ async function testMcpLoop() {
   });
   console.log('First check match:', firstCheck.match);
 
-  // Step 2: Log resolution
   console.log('\n2. Logging resolution...');
   const logResult = await logResolution({
     error_message: testErrorMsg,
@@ -37,17 +35,15 @@ async function testMcpLoop() {
   console.log('Log result notice:', logResult.notice);
   console.log('Generated doc path:', logResult.doc_path);
 
-  // Step 3: Second check (e.g. hitting the same error on port 4000 or 8080)
   console.log('\n3. Checking error a second time (should match!)...');
   const secondCheck = await matchError({
-    error_message: 'Error: listen EADDRINUSE: address already in use :::8080', // different port, same class!
+    error_message: 'Error: listen EADDRINUSE: address already in use :::8080',
     technology: ['node', 'express'],
   });
   console.log('Second check match:', secondCheck.match);
   console.log('Occurrence count:', secondCheck.occurrence_count);
   console.log('Interrupt prompt:', secondCheck.interrupt_prompt);
 
-  // Step 4: Verify stats
   console.log('\n4. Fetching Errata stats...');
   const stats = await getStats();
   console.log('Total classes:', stats.totalErrorClasses);

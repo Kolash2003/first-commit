@@ -53,7 +53,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // Fallback in-memory
+
   const list = Array.from(inMemoryErrorClasses.values()).filter((e) => {
     if (!query) return true;
     return (

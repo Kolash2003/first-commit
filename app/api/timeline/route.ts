@@ -41,7 +41,7 @@ export async function GET() {
     }
   }
 
-  // Fallback demo timeline
+
   const fallbackTimeline = [
     {
       id: 'occ_demo_1',

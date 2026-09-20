@@ -4,7 +4,7 @@ import { inMemoryErrorClasses } from '@/lib/matching';
 
 export const dynamic = 'force-dynamic';
 
-/** SM-2 scheduling algorithm */
+
 function applySpacedRepetition(
   currentEaseFactor: number,
   currentInterval: number,
@@ -24,7 +24,7 @@ function applySpacedRepetition(
       break;
     case 'good':
       interval = Math.ceil(interval * ef);
-      // ef unchanged
+
       break;
     case 'easy':
       interval = Math.ceil(interval * ef * 1.3);
@@ -35,13 +35,7 @@ function applySpacedRepetition(
   return { newInterval: Math.max(1, interval), newEaseFactor: Number(ef.toFixed(2)) };
 }
 
-/**
- * GET /api/review
- * Returns error classes due for flashcard review, ordered by highest recurrence first.
- * An error is due if:
- *   - It has never been reviewed (no review_due_date), OR
- *   - Its review_due_date is today or in the past
- */
+
 export async function GET(req: NextRequest) {
   const today = new Date().toISOString().split('T')[0];
   const rawLimit = Number(req.nextUrl.searchParams.get('limit') ?? '10');
@@ -75,7 +69,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ cards: rows, total: rows.length });
     }
 
-    // In-memory fallback
+
     const classes = Array.from(inMemoryErrorClasses.values())
       .sort((a, b) => (b.occurrence_count || 1) - (a.occurrence_count || 1))
       .slice(0, limit)
@@ -99,11 +93,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * POST /api/review
- * Body: { error_class_id: string, rating: 'again'|'hard'|'good'|'easy' }
- * Applies SM-2 and stores next review_due_date + ease_factor in Neo4j.
- */
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -114,7 +104,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (isConfigured()) {
-      // Fetch current SM-2 state
+
       const existing = await runCypher<any>(
         `MATCH (e:ErrorClass { id: $id }) RETURN e.ease_factor AS ef, e.current_interval AS interval LIMIT 1`,
         { id: error_class_id }
@@ -147,7 +137,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, nextDue: nextDueStr, interval: newInterval, easeFactor: newEaseFactor });
     }
 
-    // In-memory: just acknowledge
+
     return NextResponse.json({ ok: true, nextDue: null, interval: 1, easeFactor: 2.5 });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Failed to submit review.' }, { status: 500 });

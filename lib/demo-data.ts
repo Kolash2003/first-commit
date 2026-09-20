@@ -18,7 +18,7 @@ export interface DemoErrorDefinition {
 }
 
 export const DEMO_ERRORS: DemoErrorDefinition[] = [
-  // 1. EADDRINUSE
+
   {
     error_message: 'Error: listen EADDRINUSE: address already in use :::3000',
     stack_trace: 'at Server.setupListenHandle [as _listen2] (node:net:1904:16)\n at listenInCluster (node:net:1961:12)\n at doListen (src/server.ts:42:10)',
@@ -57,7 +57,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 4,
   },
 
-  // 2. React undefined.map
+
   {
     error_message: 'TypeError: Cannot read properties of undefined (reading "map")',
     stack_trace: 'at UserList (src/components/UserList.tsx:14:22)\n at renderWithHooks (node_modules/react-dom:1289)',
@@ -83,7 +83,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 3,
   },
 
-  // 3. Postgres connection pool exhausted
+
   {
     error_message: 'PostgresError: remaining connection slots are reserved for non-replication superuser connections',
     stack_trace: 'at Connection.parseE (node_modules/pg/lib/connection.js:614:13)\n at Client.connect (src/db/pool.ts:28:9)',
@@ -108,7 +108,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 4. CORS blocked
+
   {
     error_message: "Access to fetch at 'https://api.myapp.io/users' from origin 'http://localhost:3000' has been blocked by CORS policy",
     stack_trace: 'at XMLHttpRequest.onreadystatechange (src/api/client.ts:34:14)',
@@ -133,7 +133,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 3,
   },
 
-  // 5. JWT malformed
+
   {
     error_message: 'JsonWebTokenError: jwt malformed',
     stack_trace: 'at /node_modules/jsonwebtoken/verify.js:63:21\n at middleware/auth.ts:18:12',
@@ -159,7 +159,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 6. Maximum call stack
+
   {
     error_message: 'RangeError: Maximum call stack size exceeded',
     stack_trace: 'at flatten (src/utils/tree.ts:12:18)\n at flatten (src/utils/tree.ts:14:22)\n at flatten (src/utils/tree.ts:14:22)',
@@ -187,7 +187,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 7. ETIMEDOUT microservices
+
   {
     error_message: 'Error: connect ETIMEDOUT 10.0.1.45:5432',
     stack_trace: 'at TCPConnectWrap.afterConnect (node:net:1300:16)\n at src/services/db.ts:55:10',
@@ -214,7 +214,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 8. fetch not defined Node 17
+
   {
     error_message: 'ReferenceError: fetch is not defined',
     stack_trace: 'at callAPI (src/services/weather.ts:8:18)\n at Object.<anonymous> (src/index.ts:22:1)',
@@ -240,7 +240,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 9. React hydration mismatch
+
   {
     error_message: 'Error: Hydration failed because the initial UI does not match what was rendered on the server.',
     stack_trace: 'at throwOnHydrationMismatch (react-dom.development.js:12507:9)\n at app/layout.tsx:23:5',
@@ -266,7 +266,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 3,
   },
 
-  // 10. npm EACCES
+
   {
     error_message: 'npm ERR! code EACCES\nnpm ERR! syscall mkdir\nnpm ERR! path /usr/local/lib/node_modules',
     stack_trace: 'npm ERR! Error: EACCES: permission denied, mkdir /usr/local/lib/node_modules',
@@ -299,7 +299,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 11. Python ModuleNotFoundError
+
   {
     error_message: "ModuleNotFoundError: No module named 'pandas'",
     stack_trace: 'File "scripts/analyze.py", line 2, in <module>\n    import pandas as pd',
@@ -325,7 +325,7 @@ export const DEMO_ERRORS: DemoErrorDefinition[] = [
     occurrences: 2,
   },
 
-  // 12. Git merge conflict
+
   {
     error_message: 'CONFLICT (content): Merge conflict in src/api/routes.ts\nAutomatic merge failed; fix conflicts and then commit the result.',
     stack_trace: '',
@@ -361,7 +361,7 @@ export async function seedDemoData(onProgress?: (index: number, total: number, t
     try {
       await initNeo4jSchema();
     } catch {
-      // Schema may already exist
+
     }
   }
 
@@ -371,22 +371,22 @@ export async function seedDemoData(onProgress?: (index: number, total: number, t
     const e = DEMO_ERRORS[i];
     const { occurrences, ...base } = e;
 
-    // Seed first occurrence
+
     const first = await logResolution({ ...base, user_solved_unaided: false });
     totalOccurrences++;
     onProgress?.(i + 1, DEMO_ERRORS.length, first.title);
 
-    // Seed additional occurrences with matched_error_class_id
+
     for (let occ = 1; occ < occurrences; occ++) {
       await logResolution({
         ...base,
         matched_error_class_id: first.error_class_id,
-        user_solved_unaided: occ % 2 === 0, // alternate self-solved
+        user_solved_unaided: occ % 2 === 0,
       });
       totalOccurrences++;
     }
 
-    // Emit live capture event
+
     eventBus.emit({
       type: 'capture',
       errorClassId: first.error_class_id,

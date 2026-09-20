@@ -43,7 +43,6 @@ export function useLivePulse({ onCapture }: LivePulseCallbacks = {}) {
           onCaptureRef.current?.();
         }
       } catch {
-        // ignore parse errors
       }
     };
 

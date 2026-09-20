@@ -125,7 +125,6 @@ export function useDashboardData() {
           body: JSON.stringify({ error_class_id: card.id, rating }),
         });
       } catch {
-        // non-fatal
       }
       setTimeout(() => {
         setReviewRating(null);

@@ -5,8 +5,8 @@ export interface ErrataStats {
   totalErrorClasses: number;
   totalOccurrences: number;
   totalSelfSolved: number;
-  selfSolveRate: number; // percentage (0 - 100)
-  recidivismRate: number; // percentage of classes seen > 1 time
+  selfSolveRate: number;
+  recidivismRate: number;
   topRecurring: Array<{
     id: string;
     title: string;
@@ -22,7 +22,7 @@ export interface ErrataStats {
 export async function getStats(): Promise<ErrataStats> {
   if (isConfigured()) {
     try {
-      // 1. Overall counts
+
       const countsRes = await runCypher<any>(`
         MATCH (e:ErrorClass)
         OPTIONAL MATCH (o:Occurrence)
@@ -36,7 +36,7 @@ export async function getStats(): Promise<ErrataStats> {
       const totalOccs = countsRes[0]?.total_occs || 0;
       const totalSelfSolved = countsRes[0]?.total_self_solved || 0;
 
-      // 2. Recidivism count
+
       const recidivismRes = await runCypher<any>(`
         MATCH (e:ErrorClass)
         WHERE e.occurrence_count > 1
@@ -44,7 +44,7 @@ export async function getStats(): Promise<ErrataStats> {
       `);
       const recurringClasses = recidivismRes[0]?.recurring_classes || 0;
 
-      // 3. Top recurring
+
       const topRes = await runCypher<any>(`
         MATCH (e:ErrorClass)
         OPTIONAL MATCH (e)-[:TAGGED]->(t:Technology)
@@ -59,7 +59,7 @@ export async function getStats(): Promise<ErrataStats> {
         LIMIT 10
       `);
 
-      // 4. Technology breakdown
+
       const techRes = await runCypher<any>(`
         MATCH (t:Technology)<-[:TAGGED]-(e:ErrorClass)
         RETURN t.name AS name, count(e) AS count
@@ -67,7 +67,7 @@ export async function getStats(): Promise<ErrataStats> {
         LIMIT 10
       `);
 
-      // 5. Concept breakdown
+
       const conceptRes = await runCypher<any>(`
         MATCH (c:Concept)<-[:TEACHES]-(e:ErrorClass)
         RETURN c.name AS name, count(e) AS count
@@ -100,7 +100,7 @@ export async function getStats(): Promise<ErrataStats> {
     }
   }
 
-  // Fallback to in-memory stats
+
   const classes = Array.from(inMemoryErrorClasses.values());
   const totalClasses = classes.length;
   let totalOccs = 0;

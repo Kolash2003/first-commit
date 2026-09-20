@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       technology: body.technology,
     });
 
-    // 🔴 Emit live check event to SSE subscribers if a known error was matched
+
     if (result.match && result.error_class_id) {
       eventBus.emit({
         type: 'check_match',

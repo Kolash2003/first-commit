@@ -3,7 +3,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load local environment files if present
+
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -55,14 +55,14 @@ async function main() {
     }
   );
 
-  // Initialize Neo4j schema in background if configured
+
   if (isConfigured()) {
     initNeo4jSchema().catch((err) => {
       console.error('[Errata MCP] Background schema initialization notice:', err.message);
     });
   }
 
-  // 1. Prompts
+
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
     return {
       prompts: [
@@ -92,7 +92,6 @@ async function main() {
     throw new Error(`Unknown prompt: ${request.params.name}`);
   });
 
-  // 2. Tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools: [

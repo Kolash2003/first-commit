@@ -1,8 +1,4 @@
-/**
- * event-bus.ts
- * Lightweight in-process pub/sub for the SSE live capture pulse.
- * Works in Next.js dev (shared module cache) and single-process prod.
- */
+
 
 export interface ErrataEvent {
   type: 'capture' | 'check_match' | 'check_new';
@@ -16,7 +12,7 @@ export interface ErrataEvent {
 
 type Listener = (event: ErrataEvent) => void;
 
-// Cache across hot-reloads in development
+
 declare global {
   var __errata_event_bus: {
     listeners: Set<Listener>;
@@ -34,7 +30,7 @@ function createBus() {
         try {
           cb(event);
         } catch {
-          // ignore listener errors
+
         }
       });
     },

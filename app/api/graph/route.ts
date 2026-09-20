@@ -25,7 +25,7 @@ export async function GET() {
 
   if (isConfigured()) {
     try {
-      // 1. Fetch ErrorClasses
+
       const errorClasses = await runCypher<any>(`
         MATCH (e:ErrorClass)
         OPTIONAL MATCH (e)-[:CAUSED_BY]->(rc:RootCause)
@@ -46,7 +46,7 @@ export async function GET() {
           label: e.title || e.id,
           type: 'ErrorClass',
           val: Math.max(14, Math.min(30, 10 + occCount * 3)),
-          color: '#f43f5e', // Vibrant Rose/Red
+          color: '#f43f5e',
           details: {
             id: e.id,
             title: e.title,
@@ -60,7 +60,6 @@ export async function GET() {
           },
         });
 
-        // Root Cause Node
         if (row.rc?.summary) {
           const rcId = `rc_${row.rc.id || e.id}`;
           if (!nodesMap.has(rcId)) {
@@ -69,14 +68,13 @@ export async function GET() {
               label: row.rc.summary.length > 35 ? `${row.rc.summary.substring(0, 32)}...` : row.rc.summary,
               type: 'RootCause',
               val: 10,
-              color: '#f59e0b', // Amber
+              color: '#f59e0b',
               details: { summary: row.rc.summary },
             });
           }
           links.push({ source: eId, target: rcId, label: 'CAUSED_BY' });
         }
 
-        // Fix Node
         if (row.fix?.summary) {
           const fixId = `fix_${row.fix.id || e.id}`;
           if (!nodesMap.has(fixId)) {
@@ -85,14 +83,13 @@ export async function GET() {
               label: row.fix.summary.length > 35 ? `${row.fix.summary.substring(0, 32)}...` : row.fix.summary,
               type: 'Fix',
               val: 10,
-              color: '#10b981', // Emerald
+              color: '#10b981',
               details: { summary: row.fix.summary },
             });
           }
           links.push({ source: eId, target: fixId, label: 'FIXED_BY' });
         }
 
-        // Tech Nodes
         if (Array.isArray(row.techs)) {
           for (const t of row.techs) {
             if (!t?.name) continue;
@@ -103,14 +100,13 @@ export async function GET() {
                 label: t.name,
                 type: 'Technology',
                 val: 8,
-                color: '#3b82f6', // Blue
+                color: '#3b82f6',
               });
             }
             links.push({ source: eId, target: tId, label: 'TAGGED' });
           }
         }
 
-        // Concept Nodes
         if (Array.isArray(row.concepts)) {
           for (const c of row.concepts) {
             if (!c?.name) continue;
@@ -121,7 +117,7 @@ export async function GET() {
                 label: c.name,
                 type: 'Concept',
                 val: 9,
-                color: '#06b6d4', // Cyan
+                color: '#06b6d4',
               });
             }
             links.push({ source: eId, target: cId, label: 'TEACHES' });
@@ -129,7 +125,6 @@ export async function GET() {
         }
       }
 
-      // 2. Fetch recent occurrences
       const occs = await runCypher<any>(`
         MATCH (o:Occurrence)-[:INSTANCE_OF]->(e:ErrorClass)
         RETURN o, e.id AS error_class_id
@@ -148,7 +143,7 @@ export async function GET() {
             label: `Occ: ${o.timestamp?.split('T')[0] || 'recent'}`,
             type: 'Occurrence',
             val: 6,
-            color: '#a855f7', // Purple
+            color: '#a855f7',
             details: {
               timestamp: o.timestamp,
               project: o.project,
@@ -166,7 +161,6 @@ export async function GET() {
     }
   }
 
-  // Fallback to in-memory store if DB is empty or unconfigured
   if (nodesMap.size === 0) {
     const memClasses = Array.from(inMemoryErrorClasses.values());
     if (memClasses.length > 0) {
@@ -204,7 +198,6 @@ export async function GET() {
         }
       }
     } else {
-      // Seed default demonstrative graph nodes for first impression
       const demoEc1 = 'ec_demo_port';
       const demoEc2 = 'ec_demo_null';
 

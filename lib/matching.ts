@@ -30,7 +30,7 @@ export interface MatchResult {
   }>;
 }
 
-// In-memory fallback cache when Neo4j credentials are not yet configured
+
 const inMemoryErrorClasses: Map<string, any> = new Map();
 
 export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
@@ -38,7 +38,7 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
   const autoMergeThreshold = parseFloat(process.env.ERRATA_AUTO_MERGE_THRESHOLD || '0.6');
   const nearMissThreshold = parseFloat(process.env.ERRATA_NEAR_MISS_THRESHOLD || '0.45');
 
-  // LAYER 1: Deterministic Fingerprint Check
+
   if (isConfigured()) {
     try {
       const cypher = `
@@ -77,7 +77,6 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
       console.warn('Neo4j Layer 1 query error:', err);
     }
   } else {
-    // In-memory fallback
     const memMatch = Array.from(inMemoryErrorClasses.values()).find(
       (item) => item.fingerprint === norm.fingerprint
     );
@@ -100,7 +99,7 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
     }
   }
 
-  // LAYER 2: Semantic Embedding Match
+
   const queryEmbedding = await generateEmbedding(
     `${norm.normalizedMessage} ${input.context || ''}`
   );
@@ -201,7 +200,6 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
     };
   }
 
-  // No match
   return {
     match: false,
     occurrence_count: 0,
