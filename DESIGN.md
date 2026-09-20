@@ -1,3 +1,11 @@
+# Errata — Design Document
+
+**Status:** Implemented (v1 + review/SM-2 shipped; merge-review queue deferred)
+**Date:** 2026-09-20
+**Working name:** Errata
+
+---
+
 ## 1. Problem Statement
 
 Developers increasingly paste errors into AI assistants, accept the fix, and move on — without reading, understanding, or retaining anything. The AI's reasoning evaporates the moment the chat scrolls away. The same developer hits the same class of error weeks later and repeats the cycle, never building the mental model that turns errors into expertise.
@@ -13,10 +21,11 @@ Errata is a local-first knowledge engine that sits between AI coding assistants 
 ### Design principles
 
 1. **Learning at the moment of error** — not in a separate app the user must remember to open.
-2. **Local-first, user-owned data** — no accounts, no cloud, no telemetry. Everything lives in `~/.errata/`.
+2. **Local-first, user-owned data** — no accounts, no cloud AI calls, no telemetry. Graph data lives in the user's own online Neo4j instance (AuraDB or self-hosted via connection string); vault docs, diagrams, and config live locally under `~/.errata/` (`vault/`, `config.json`, or `ERRATA_VAULT_PATH` override).
 3. **The solving AI writes the docs** — it has the richest context; the server structures and stores.
 4. **The graph is the memory** — recurrence, relationships, and concepts are first-class, enabling spaced repetition and team sharing later without schema migration.
 5. **Docs outlive the product** — plain Markdown + Mermaid vault, Obsidian-compatible.
+6. **Offline-capable matching** — embeddings and fingerprinting run locally with zero API keys; when Neo4j is unconfigured the server falls back to an in-memory store so the check → log loop still works.
 
 ---
 
@@ -28,11 +37,11 @@ Errata is a local-first knowledge engine that sits between AI coding assistants 
 | 2 | Audience | **Solo first, teams later** | Zero auth/privacy burden in v1; schema designed so team mode needs no migration |
 | 3 | Learning loop | **All three, phased** | v1: interrupt-at-error + auto-docs; v2: spaced repetition — one graph schema supports all |
 | 4 | Viewing surface | **Markdown vault + Next.js dashboard** | User owns portable docs forever; Next.js dashboard provides graph viz, stats, review UI |
-| 5 | Tech stack | **TypeScript + Neo4j online graph DB** | Official MCP SDK is TS-first; Neo4j = online cloud graph database (AuraDB or remote instance via connection string) with Cypher + vector index; Next.js App Router for dashboard |
-| 6 | Matching engine | **Hybrid: fingerprint + embeddings** | Deterministic exact-class matching plus semantic similarity |
-| 7 | Doc generation | **Client AI writes, server stores** | The solving model has full context; no API key management; works offline |
+| 5 | Tech stack | **TypeScript + Neo4j online graph DB + Next.js dashboard** | Official MCP SDK is TS-first; Neo4j = online cloud graph database (AuraDB or remote instance via `NEO4J_URI`/`NEO4J_URL` + credentials) with Cypher + vector index; Next.js App Router for dashboard; no cloud embedding vendor |
+| 6 | Matching engine | **Hybrid: fingerprint + local embeddings (384-dim)** | Deterministic exact-class matching plus semantic similarity; local Transformers.js (`Xenova/all-MiniLM-L6-v2`) when `@huggingface/transformers` is installed, otherwise deterministic 384-dim hash fallback — same dimension so the Neo4j vector index never mismatches |
+| 7 | Doc generation | **Client AI writes, server stores** | The solving model has full context; no API key management; works offline; vault file is authoritative for `doc_path` |
 
-Additional decision made in design: **embeddings run locally** via Transformers.js (e.g. `all-MiniLM-L6-v2`) — no API key, matching works fully offline, consistent with local-first principle.
+Additional decision made in design: **embeddings run locally** (384 dims, `Xenova/all-MiniLM-L6-v2` via Transformers.js when installed, else a deterministic local hash embedding of the same dimension) — no API key, matching works fully offline, consistent with local-first principle. Set `ERRATA_DISABLE_LOCAL_MODEL=1` to force the hash fallback. Thresholds are env-tunable: `ERRATA_AUTO_MERGE_THRESHOLD` (default `0.6`), `ERRATA_NEAR_MISS_THRESHOLD` (default `0.45`).
 
 ---
 
@@ -61,19 +70,21 @@ Additional decision made in design: **embeddings run locally** via Transformers.
        │ neo4j+s://  │                │ Obsidian-ready │   │ localhost    │
        └─────────────┘                └────────────────┘   └──────────────┘
 
-Graph data in Online Neo4j DB (via connection string).
-Local vault and config under ~/.errata/ (vault/, config.json).
+Graph data in Online Neo4j DB (via `NEO4J_URI` or `NEO4J_URL` + username/password/database).
+Local vault and config under `~/.errata/` (`vault/`, `config.json`), overridable via `ERRATA_VAULT_PATH`.
+When Neo4j is unconfigured, the MCP server and API routes fall back to an in-memory store so the check → log loop still works (graph features degrade gracefully).
+The dashboard additionally exposes Next.js API routes (`/api/check-error`, `/api/log-resolution`, `/api/graph`, `/api/timeline`, `/api/errors`, `/api/errors/[id]`, `/api/stats`, `/api/search`, `/api/review`, `/api/seed`, `/api/events` SSE, `/api/neo4j/status`, `/api/neo4j/setup`), an in-app MCP simulator, a demo seeder (12 curated error classes), and a live event bus (capture / check_match / check_new toasts).
 ```
 
 ### 4.1 Components and isolation
 
 | Component | Responsibility | Depends on | Testable via |
 |-----------|---------------|------------|--------------|
-| **MCP Server** | Exposes tools, holds server instructions, routes calls | Capture Engine, Matching Engine | Headless MCP client harness |
-| **Capture Engine** | Validates tool payloads, writes nodes/edges, updates counters | Neo4j Driver | Unit tests on schema ops |
-| **Matching Engine** | Fingerprint normalization, embedding, similarity scoring, merge candidates | Neo4j vector index/Cypher, Transformers.js | Unit tests on normalizer + golden error corpus |
-| **Vault Writer** | Renders stored error data → Markdown + Mermaid files | Templates | Snapshot tests on generated docs |
-| **Dashboard** | Read/analyze UI over graph + vault | Next.js API routes & Neo4j | Component tests + e2e |
+| **MCP Server** (`bin/errata-mcp.ts`) | Exposes 7 tools, holds server instructions + `errata_workflow` prompt, routes calls | Capture Engine, Matching Engine, stats/search/review queries | `npm run test:mcp` headless harness |
+| **Capture Engine** (`lib/capture.ts`) | Validates payloads, writes ErrorClass/Occurrence/RootCause/Fix/Technology/Concept/File/Project/DocPage nodes + edges, updates counters | Neo4j Driver (or in-memory fallback) | `test:mcp` loop asserting graph/vault state |
+| **Matching Engine** (`lib/matching.ts` + `lib/normalizer.ts` + `lib/embeddings.ts`) | Fingerprint normalization, local embedding, cosine similarity, tech-overlap gating, near-miss list | Neo4j Cypher (or in-memory scan); local model or hash fallback | `npm run test:normalizer` golden corpus |
+| **Vault Writer** (`lib/vault.ts`) | Renders stored error data → Markdown + Mermaid files; filename is authoritative for `doc_path` | Templates | Generated-doc existence check in `test:mcp` |
+| **Dashboard** (`app/`, `components/`, `hooks/`) | 7 tabs (graph, timeline, vault, stats, review, search, simulator) + Neo4j config modal + live toasts over graph + vault | Next.js API routes & Neo4j (or in-memory) | Manual + e2e |
 
 Each unit has one purpose, communicates through a typed interface, and can be understood without reading its internals.
 
@@ -109,11 +120,12 @@ Each unit has one purpose, communicates through a typed interface, and can be un
 }
 ```
 
-**Output**
+**Output** (implemented superset — `title`, `match_layer`, `similarity_score` are extra but harmless)
 ```json
 {
   "match": true,
   "error_class_id": "ec_9f2a",
+  "title": "EADDRINUSE: port already in use",
   "occurrence_count": 3,
   "first_seen": "2026-07-14",
   "last_seen": "2026-09-02",
@@ -121,7 +133,9 @@ Each unit has one purpose, communicates through a typed interface, and can be un
   "past_fix_summary": "Find and kill the listener (lsof -i :PORT) or change ports",
   "doc_path": "errors/2026-07-14-eaddrinuse-port-in-use.md",
   "interrupt_prompt": "You've hit this 3× before. Want to try fixing it yourself first?",
-  "similar_but_unmatched": [ { "error_class_id": "ec_1b77", "similarity": 0.86 } ]
+  "match_layer": "fingerprint | semantic | none",
+  "similarity_score": 1.0,
+  "similar_but_unmatched": [ { "error_class_id": "ec_1b77", "title": "…", "similarity": 0.86 } ]
 }
 ```
 
@@ -148,10 +162,11 @@ Each unit has one purpose, communicates through a typed interface, and can be un
 }
 ```
 
-**Output**
+**Output** (implemented superset — includes `title`)
 ```json
 {
   "error_class_id": "ec_9f2a",
+  "title": "EADDRINUSE: port already in use",
   "occurrence_count": 4,
   "doc_path": "errors/2026-07-14-eaddrinuse-port-in-use.md",
   "notice": "4th occurrence — doc updated; added to review queue",
@@ -159,15 +174,19 @@ Each unit has one purpose, communicates through a typed interface, and can be un
 }
 ```
 
-### 6.3 Supporting tools
+`suggested_review` is `true` when `occurrence_count >= 3`. `doc_path` is the vault-authoritative slug filename actually written (see §9), stored back onto the `ErrorClass` node.
 
-| Tool | Purpose | Phase |
-|------|---------|-------|
-| `get_error_doc` | Return full Markdown doc for an error class | v1 |
-| `search_errors` | Natural-language search over error classes (embedding + keyword) | v1.5 |
-| `get_stats` | Recurrence stats, top error classes, streaks, self-solve rate | v1 |
-| `get_review_queue` | Spaced-repetition cards due for review | v2 |
-| `submit_review_result` | Record recall outcome (feeds SM-2 scheduling) | v2 |
+### 6.3 Supporting tools (all implemented in `bin/errata-mcp.ts`)
+
+| Tool | Purpose | Phase | Notes |
+|------|---------|-------|-------|
+| `get_error_doc` | Return full Markdown doc for an error class (`doc_path`) | v1 ✅ shipped | Reads from local vault; `isError` when missing |
+| `search_errors` | Keyword search over error classes (`query`, `limit`) | v1.5 ✅ shipped (keyword; embedding-ranked search deferred) | Cypher `CONTAINS` on title/root-cause/fix; `[]` offline |
+| `get_stats` | Recurrence stats, top error classes, recidivism/self-solve rates, tech + concept breakdowns | v1 ✅ shipped | Neo4j or in-memory fallback |
+| `get_review_queue` | Spaced-repetition cards due (`limit`; `review_due_date IS NULL OR <= today`, ordered by recurrence) | v2 ✅ shipped early | Backed by same SM-2 fields as `/api/review` |
+| `submit_review_result` | Record recall outcome (`error_class_id`, `rating: again\|hard\|good\|easy`; feeds SM-2 `ease_factor`/`current_interval`/`review_due_date`) | v2 ✅ shipped early | Offline returns `{ ok: true, offline: true }` |
+
+Merge-review queue (`SIMILAR_TO` approve/reject surface): **deferred — not implemented**. Near-misses are returned in `similar_but_unmatched` but not persisted.
 
 ### 6.4 Capture compliance (the #1 product risk)
 
@@ -195,16 +214,16 @@ Normalization pipeline applied to `error_message` + top stack frames:
 
 `EADDRINUSE :::3000` and `EADDRINUSE :::8080` produce the **same fingerprint** → same `ErrorClass`. Exact-hash matching is instant with zero false positives.
 
-### 7.2 Layer 2 — Embeddings (semantic)
+### 7.2 Layer 2 — Embeddings (semantic, local-only)
 
-- Model: `all-MiniLM-L6-v2` via Transformers.js, fully local, no API key.
-- Embedded text: normalized error + root cause.
-- Stored in Neo4j (property `embedding` on `ErrorClass` nodes); cosine similarity search or Neo4j vector index query at check time.
-- Match requires **both** cosine ≥ threshold (**0.6**, calibrated 2026-09-19 on all-MiniLM-L6-v2: same-class paraphrase 0.63–0.72, same-family different-cause 0.47, different-class 0.24, unrelated ~0.0) **and** technology-tag overlap — catches "connection refused" ≈ "ECONNREFUSED" without merging unrelated errors. Near-misses scoring 0.45–0.6 go to the merge-review queue instead of auto-merging.
+- Model: `Xenova/all-MiniLM-L6-v2` via Transformers.js when `@huggingface/transformers` is installed, else a deterministic 384-dim local hash embedding (word + 3–5-gram char features, signed MD5 bucketing, L2-normalized). Both are 384-dim so the Neo4j vector index never mismatches. No cloud calls, ever.
+- Embedded text (implemented): `check_error` embeds the **normalized error message** (no root cause exists yet); `log_resolution` embeds **normalized error + root cause**. (Spec ideal is normalized error + root cause everywhere; `context` is accepted but not embedded.)
+- Stored in Neo4j (property `embedding` on `ErrorClass` nodes); at check time candidates are scanned with in-code cosine similarity (Neo4j vector index is created for future use). Offline/in-memory mode scans the in-memory map the same way.
+- Match requires **both** cosine ≥ auto-merge threshold (default **0.6**, env `ERRATA_AUTO_MERGE_THRESHOLD`; calibrated 2026-09-19 on all-MiniLM-L6-v2: same-class paraphrase 0.63–0.72, same-family different-cause 0.47, different-class 0.24, unrelated ~0.0) **and** technology-tag overlap — implemented strictly: if the caller supplies `technology[]`, the candidate must share ≥1 tag (untagged candidates do **not** auto-merge). Near-misses scoring 0.45–0.6 (`ERRATA_NEAR_MISS_THRESHOLD`) are returned in `similar_but_unmatched`, never auto-merged.
 
 ### 7.3 Merge-review queue
 
-Candidates scoring between the auto-merge threshold and a lower bound (the "uncertain band") are **never auto-merged**. They appear in the dashboard's merge-review queue for one-click approve/reject. The graph never silently corrupts, and user corrections feed threshold tuning.
+**Deferred — not implemented.** Candidates in the uncertain band are returned to the caller but not persisted and have no dashboard surface. The graph never silently merges (conservative thresholds + strict tech-tag requirement), but there is no approve/reject queue yet.
 
 ---
 
@@ -223,15 +242,17 @@ Candidates scoring between the auto-merge threshold and a lower bound (the "unce
 
 | Node | Key properties |
 |------|---------------|
-| `ErrorClass` | id, fingerprint, title, embedding (float array), first_seen, last_seen, occurrence_count, self_solved_count, review_due_date (v2), ease_factor (v2) |
-| `Occurrence` | id, timestamp, raw_message, stack_trace, context, user_solved_unaided, session_id |
-| `RootCause` | id, summary |
-| `Fix` | id, summary, steps |
+| `ErrorClass` | id, fingerprint, title, embedding (384-float array), first_seen, last_seen, occurrence_count, self_solved_count, doc_path, root_cause (denormalized), past_fix_summary (denormalized), review_due_date, ease_factor, current_interval, last_reviewed |
+| `Occurrence` | id, timestamp, raw_message, stack_trace, project (denormalized), user_solved_unaided (no `context`/`session_id` in code) |
+| `RootCause` | id (`rc_<errorClassId>`), summary |
+| `Fix` | id (`fix_<errorClassId>`), summary (no `steps` in code) |
 | `Technology` | name |
-| `Concept` | id, name, explanation |
-| `File` | path |
+| `Concept` | name (no `id`/`explanation` in code) |
+| `File` | path (no uniqueness constraint in code) |
 | `Project` | name |
-| `DocPage` | path, updated_at |
+| `DocPage` | path, updated_at (written on every capture; `DOCUMENTED_IN` edge created) |
+
+Notes: `SIMILAR_TO` edges are **not written by capture** (deferred with merge-review). Dashboard graph renders a demo `SIMILAR_TO` link only for placeholder data.
 
 ### Neo4j Cypher Schema & Constraints
 
@@ -243,6 +264,7 @@ CREATE CONSTRAINT occurrence_id_unique IF NOT EXISTS FOR (o:Occurrence) REQUIRE 
 CREATE CONSTRAINT tech_name_unique IF NOT EXISTS FOR (t:Technology) REQUIRE t.name IS UNIQUE;
 CREATE CONSTRAINT concept_name_unique IF NOT EXISTS FOR (c:Concept) REQUIRE c.name IS UNIQUE;
 CREATE CONSTRAINT project_name_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.name IS UNIQUE;
+CREATE CONSTRAINT docpage_path_unique IF NOT EXISTS FOR (d:DocPage) REQUIRE d.path IS UNIQUE;
 
 // Performance Indexes
 CREATE INDEX occurrence_timestamp IF NOT EXISTS FOR (o:Occurrence) ON (o.timestamp);
@@ -322,48 +344,54 @@ sequenceDiagram
 - [ ] Do you know two ways to free a port?
 ````
 
-- YAML frontmatter keeps docs machine-readable.
+- YAML frontmatter keeps docs machine-readable (`similar:` is written only when similar links exist).
 - `[[wiki-links]]` give free backlinks and graph view in Obsidian.
-- Diagrams are authored by the solving AI (richest context) and passed through `log_resolution`.
+- Diagrams are authored by the solving AI (richest context) and passed through `log_resolution`; when absent the writer emits a generic fallback flowchart/sequence diagram (no Mermaid validation in code).
+- Filename is `errors/<first_seen-date>-<slug(title, 40 chars)>.md`; the writer's return value is authoritative — capture stores exactly that path on the `ErrorClass`/`DocPage` nodes (previously capture guessed `<date>-<id>.md`, now fixed).
+- `concepts/` pages are not generated; only `index.md` + `errors/` docs are written. Solved-by renders as `AI` / `**Me**`.
+- "Learn this" checklist is currently three generic prompts (trigger conditions, reproduce-without-docs, CI prevention), not per-error questions.
 
 ---
 
 ## 10. Dashboard (Next.js App Router, served on localhost:3000)
 
-| Page | Contents | Phase |
-|------|----------|-------|
-| **Graph view** | Force-directed interactive graph: error classes, causes, concepts, similarity edges | v1 |
-| **Timeline** | Chronological occurrences with recurrence markers and project filters | v1 |
-| **Error detail** | Rendered doc + diagrams + full occurrence log | v1 |
-| **Stats** | Top recurring error classes, recidivism rate, self-solve rate, learning streaks | v1 |
-| **Merge review** | Approve/reject near-match candidates | v1.5 |
-| **Search** | Natural-language over the graph | v1.5 |
-| **Review** | Flashcards with SM-2 spaced repetition + recall analytics | v2 |
+| Tab | Contents | Phase | Status |
+|------|----------|-------|--------|
+| **Graph view** | Force-directed interactive graph: error classes, causes, fixes, concepts, technology nodes, occurrences | v1 | ✅ shipped (SIMILAR_TO only in demo placeholder data) |
+| **Timeline** | Chronological occurrences with recurrence markers | v1 | ✅ shipped (no project filter in code) |
+| **Vault / Error detail** | Error list + rendered doc + diagrams + occurrence log | v1 | ✅ shipped as `vault` tab |
+| **Stats** | Top recurring classes, recidivism rate, self-solve rate, tech/concept breakdowns | v1 | ✅ shipped (no streaks UI in code) |
+| **Merge review** | Approve/reject near-match candidates | v1.5 | ❌ deferred — not built |
+| **Search** | Keyword search over the graph | v1.5 | ✅ shipped early (keyword `CONTAINS`; embedding-ranked search deferred) |
+| **Review** | Flashcards with SM-2 (`again/hard/good/easy`) + due queue | v2 | ✅ shipped early |
+| **Simulator** | In-app MCP check/log simulator + setup logs | — | ✅ extra (not in original spec) |
 
-The Next.js dashboard visualizes graph insights, occurrence timelines, and stats from the online Neo4j database, while also rendering local vault markdown documents.
+Plus: `DashboardHeader` (DB status, counts), `Neo4jConfigModal` (connection manager + schema setup runner), `LiveToasts` (SSE via `/api/events` on capture/check_match/check_new). The dashboard reads from Neo4j when configured, else in-memory + placeholder demo graph.
+
+The Next.js dashboard visualizes graph insights, occurrence timelines, and stats from the online Neo4j database (or fallback store), while also rendering local vault markdown documents.
 
 ---
 
 ## 11. Feature Roadmap
 
-### v1 — MVP
-- MCP server (TypeScript, official SDK) with server instructions for capture compliance
+### v1 — MVP ✅ shipped
+- MCP server (TypeScript, official SDK) with server instructions + `errata_workflow` prompt
 - Tools: `check_error`, `log_resolution`, `get_error_doc`, `get_stats`
-- Hybrid matching engine (fingerprint + local embeddings)
-- Neo4j schema + online graph DB storage (AuraDB or remote instance via connection string)
-- Vault writer (Markdown + Mermaid)
-- Dashboard: Next.js App Router with force-directed graph, timeline, error detail, stats, connection manager, and MCP simulator
-- Install/run as an `npx` one-liner; verified on Claude Code and Cursor
+- Hybrid matching engine (fingerprint + local 384-dim embeddings, strict tech-overlap)
+- Neo4j schema + online graph DB storage (AuraDB or remote instance via `NEO4J_URI`/`NEO4J_URL`) + in-memory fallback
+- Vault writer (Markdown + Mermaid, vault-authoritative `doc_path`, `DocPage` node)
+- Dashboard: Next.js App Router with force-directed graph, timeline, vault detail, stats, connection manager, MCP simulator, live toasts, demo seeder
+- Scripts: `mcp` (stdio server), `test:normalizer`, `test:mcp`, `seed` (12 curated error classes)
 
-### v1.5
-- `search_errors` + dashboard search
-- Merge-review queue
-- Per-project filtering and Markdown export
+### v1.5 (partial)
+- `search_errors` + dashboard search ✅ shipped (keyword; embedding-ranked + export deferred)
+- Merge-review queue ❌ deferred
+- Per-project filtering and Markdown export ❌ deferred
 
-### v2 — Spaced repetition
-- SM-2 scheduling over `ErrorClass` (recurrence-weighted)
-- `get_review_queue`, `submit_review_result`
-- Review UI (flashcards) + recall analytics ("you now fix X unaided")
+### v2 — Spaced repetition ✅ shipped early
+- SM-2 scheduling over `ErrorClass` (`ease_factor`, `current_interval`, `review_due_date`, `last_reviewed`)
+- `get_review_queue`, `submit_review_result` (MCP + `/api/review` GET/POST)
+- Review UI (flashcards) ✅ (recall analytics deferred)
 
 ### v3 — Teams
 - Cloud sync, shared org graph, auth
@@ -376,27 +404,29 @@ The Next.js dashboard visualizes graph insights, occurrence timelines, and stats
 
 ### Testing
 
-| Level | Coverage |
-|-------|----------|
-| **Unit** | Fingerprint normalizer against a golden corpus of real-world errors (the make-or-break piece); matching thresholds; schema operations; vault rendering snapshots |
-| **Integration** | Headless MCP client harness simulating the full check → fix → log loop, asserting graph state and vault output |
-| **E2E** | Scripted real sessions on Claude Code and Cursor measuring **capture compliance rate** — the single metric that decides whether this product lives or dies |
+| Level | Coverage | Implementation |
+|-------|----------|----------------|
+| **Unit** | Fingerprint normalizer golden corpus | `npm run test:normalizer` (`scripts/test-normalizer.ts`): port-variation, path-basename, quoted-string, cross-category checks ✅ |
+| **Integration** | Headless check → log → check loop | `npm run test:mcp` (`scripts/test-mcp.ts`): asserts match flip, vault write, stats ✅ |
+| **E2E** | Capture compliance rate on real clients | ❌ not implemented — no scripted Claude Code/Cursor sessions |
+| **Typecheck** | — | `npx tsc --noEmit` ✅ (eslint reports pre-existing `any` warnings) |
 
 ### Risks and mitigations
 
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| AI doesn't reliably call the tools | Product is empty | §6.4: instructions field, behavioral tool descriptions, value-to-the-AI design, compliance metric gating v1 completion |
-| Bad embedding merges corrupt the graph | Wrong "seen before" claims | Conservative thresholds + tech-tag requirement + merge-review queue |
-| Diagram quality varies by client model | Ugly docs | Server validates Mermaid syntax; falls back to template-generated flowchart from structured root-cause/fix fields |
-| Scope creep | Nothing ships | Strict phasing (§11); v2/v3 features exist only as schema hooks in v1 |
+| Risk | Impact | Mitigation (implemented) |
+|------|--------|--------------------------|
+| AI doesn't reliably call the tools | Product is empty | §6.4: instructions field + `errata_workflow` prompt, behavioral tool descriptions, value-to-the-AI design; compliance metric **not** implemented |
+| Bad embedding merges corrupt the graph | Wrong "seen before" claims | Conservative thresholds (0.6/0.45, env-tunable) + **strict** tech-tag requirement (caller tech must overlap); merge-review queue **deferred** |
+| Diagram quality varies by client model | Ugly docs | **Not mitigated in code** — no Mermaid validation; generic fallback diagrams only when `diagrams[]` absent |
+| Scope creep | Nothing ships | Phasing (§11) updated to reflect shipped vs deferred |
 
 ---
 
 ## 13. Data & Privacy
 
-- Graph data lives in an **Online Neo4j Graph DB** (Neo4j AuraDB or self-hosted instance connected via TLS/`neo4j+s://` connection string).
-- Markdown docs and diagrams live locally under `~/.errata/vault/`.
+- Graph data lives in the user's **own Online Neo4j Graph DB** (Neo4j AuraDB or self-hosted instance connected via TLS/`neo4j+s://` connection string). Env: `NEO4J_URI` or `NEO4J_URL` (with embedded credentials/database) + `NEO4J_USERNAME`/`NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`.
+- Markdown docs and diagrams live locally under `~/.errata/vault/` (override: `ERRATA_VAULT_PATH`).
 - Local config under `~/.errata/config.json`.
-- Embeddings run locally via Transformers.js.
+- Embeddings run locally (Transformers.js when installed, else local hash fallback; `ERRATA_DISABLE_LOCAL_MODEL=1` forces fallback). Matching thresholds: `ERRATA_AUTO_MERGE_THRESHOLD` (0.6), `ERRATA_NEAR_MISS_THRESHOLD` (0.45). No cloud AI calls, no telemetry.
+- When Neo4j is unconfigured, everything runs against an in-memory store (no persistence across restarts).
 - v3 team sharing is opt-in and gated behind context sanitization.

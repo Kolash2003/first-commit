@@ -1,38 +1,13 @@
+// DESIGN §7.2: embeddings run locally via Transformers.js (all-MiniLM-L6-v2,
+// 384 dims) — no API key, fully offline, consistent with local-first (§2).
+// We attempt to load @huggingface/transformers if installed; otherwise fall
+// back to a deterministic 384-dim hash embedding (same dimension so the
+// Neo4j vector index never mismatches). No cloud calls, ever.
+
 import crypto from 'crypto';
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 
-export const EMBEDDING_DIMENSION = 1024;
-export const BEDROCK_EMBED_MODEL =
-  process.env.BEDROCK_EMBED_MODEL || 'amazon.titan-embed-text-v2:0';
-
-const BEDROCK_REGION =
-  process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-south-1';
-
-function getBedrockApiKey(): string | null {
-  return process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || null;
-}
-
-let bedrockClient: BedrockRuntimeClient | null | undefined;
-
-export function isBedrockConfigured(): boolean {
-  return Boolean(getBedrockApiKey() || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION);
-}
-
-function getBedrockClient(): BedrockRuntimeClient | null {
-  if (bedrockClient !== undefined) return bedrockClient;
-  if (!isBedrockConfigured()) {
-    bedrockClient = null;
-    return bedrockClient;
-  }
-  try {
-    bedrockClient = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION,
-    });
-  } catch {
-    bedrockClient = null;
-  }
-  return bedrockClient;
-}
+export const EMBEDDING_DIMENSION = 384;
+export const LOCAL_EMBED_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length || a.length === 0) return 0;
@@ -51,37 +26,29 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-async function invokeBedrockViaApiKey(apiKey: string, text: string): Promise<number[] | null> {
-  const url = `https://bedrock-runtime.${BEDROCK_REGION}.amazonaws.com/model/${BEDROCK_EMBED_MODEL}/invoke`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      inputText: text,
-      dimensions: EMBEDDING_DIMENSION,
-      normalize: true,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Bedrock HTTP ${res.status}: ${(await res.text()).substring(0, 200)}`);
-  }
-  const payload = await res.json();
-  const vector: unknown = payload.embedding;
-  if (
-    Array.isArray(vector) &&
-    vector.length === EMBEDDING_DIMENSION &&
-    vector.every((v) => typeof v === 'number')
-  ) {
-    return (vector as number[]).map((v) => Number(v.toFixed(6)));
-  }
-  console.warn(
-    `Bedrock returned unexpected embedding shape (len=${Array.isArray(vector) ? vector.length : 'n/a'}); using offline fallback.`
-  );
-  return null;
+type TransformerPipeline = (text: string, opts?: unknown) => Promise<unknown>;
+
+let pipelinePromise: Promise<TransformerPipeline | null> | null = null;
+
+async function getLocalPipeline(): Promise<TransformerPipeline | null> {
+  if (process.env.ERRATA_DISABLE_LOCAL_MODEL === '1') return null;
+  if (pipelinePromise) return pipelinePromise;
+  pipelinePromise = (async () => {
+    try {
+      const mod = await Function(
+        'return import("@huggingface/transformers")'
+      )() as { pipeline: (task: string, model: string) => Promise<TransformerPipeline> };
+      if (!mod?.pipeline) return null;
+      return await mod.pipeline('feature-extraction', LOCAL_EMBED_MODEL);
+    } catch {
+      return null;
+    }
+  })();
+  return pipelinePromise;
+}
+
+export async function isLocalModelAvailable(): Promise<boolean> {
+  return (await getLocalPipeline()) !== null;
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
@@ -90,50 +57,35 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     return new Array<number>(EMBEDDING_DIMENSION).fill(0);
   }
 
-  const apiKey = getBedrockApiKey();
-  if (apiKey) {
-    try {
-      const vector = await invokeBedrockViaApiKey(apiKey, normalized);
-      if (vector) return vector;
-    } catch (err: any) {
-      console.warn(
-        `Bedrock embedding failed (${err?.name || 'Error'}: ${err?.message || String(err)}); using offline fallback.`
-      );
-    }
-    return generateHashEmbedding(normalized);
-  }
-
-  const client = getBedrockClient();
-  if (client) {
-    try {
-      const command = new InvokeModelCommand({
-        modelId: BEDROCK_EMBED_MODEL,
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify({
-          inputText: normalized,
-          dimensions: EMBEDDING_DIMENSION,
-          normalize: true,
-        }),
-      });
-      const response = await client.send(command);
-      const payload = JSON.parse(new TextDecoder().decode(response.body));
-      const vector: unknown = payload.embedding;
-      if (
-        Array.isArray(vector) &&
-        vector.length === EMBEDDING_DIMENSION &&
-        vector.every((v) => typeof v === 'number')
-      ) {
-        return (vector as number[]).map((v) => Number(v.toFixed(6)));
+  try {
+    const pipe = await getLocalPipeline();
+    if (pipe) {
+      const out = (await pipe(normalized, { pooling: 'mean', normalize: true })) as
+        | { data?: ArrayLike<number>; dims?: number[] }
+        | { tolist?: () => number[][] };
+      let vec: number[] | null = null;
+      if (out && typeof out === 'object' && 'data' in out && out.data) {
+        vec = Array.from(out.data as ArrayLike<number>);
+      } else if (out && typeof (out as { tolist?: unknown }).tolist === 'function') {
+        const rows = (out as { tolist: () => number[][] }).tolist();
+        if (Array.isArray(rows) && rows.length > 0) vec = rows[0];
       }
-      console.warn(
-        `Bedrock returned unexpected embedding shape (len=${Array.isArray(vector) ? vector.length : 'n/a'}); using offline fallback.`
-      );
-    } catch (err: any) {
-      console.warn(
-        `Bedrock embedding failed (${err?.name || 'Error'}: ${err?.message || String(err)}); using offline fallback.`
-      );
+      if (vec && vec.length > 0) {
+        const fixed =
+          vec.length === EMBEDDING_DIMENSION
+            ? vec
+            : vec.length > EMBEDDING_DIMENSION
+              ? vec.slice(0, EMBEDDING_DIMENSION)
+              : [...vec, ...new Array<number>(EMBEDDING_DIMENSION - vec.length).fill(0)];
+        let n = 0;
+        for (const v of fixed) n += v * v;
+        n = Math.sqrt(n);
+        if (n > 0) return fixed.map((v) => Number((v / n).toFixed(6)));
+        return fixed.map((v) => Number(v.toFixed(6)));
+      }
     }
+  } catch (err) {
+    console.warn('Local transformer embedding failed; using hash fallback:', (err as Error)?.message);
   }
 
   return generateHashEmbedding(normalized);

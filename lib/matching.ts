@@ -100,9 +100,9 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
   }
 
 
-  const queryEmbedding = await generateEmbedding(
-    `${norm.normalizedMessage} ${input.context || ''}`
-  );
+  // DESIGN §7.2: embedded text = normalized error (+ root cause when known).
+  // At check time there is no root cause yet, so embed the normalized message.
+  const queryEmbedding = await generateEmbedding(norm.normalizedMessage);
 
   const inputTech = (input.technology || []).map((t) => t.toLowerCase());
   const nearMisses: Array<{ error_class_id: string; title: string; similarity: number }> = [];
@@ -159,10 +159,12 @@ export async function matchError(input: CheckErrorInput): Promise<MatchResult> {
 
     const sim = cosineSimilarity(queryEmbedding, cand.embedding);
 
+    // DESIGN §7.2: match requires BOTH cosine ≥ threshold AND technology-tag
+    // overlap. If the caller supplies tech tags, the candidate must share at
+    // least one — an untagged candidate must NOT auto-merge (prevents graph
+    // corruption, §12). Scores in [nearMiss, autoMerge) go to merge-review.
     const hasTechOverlap =
-      inputTech.length === 0 ||
-      cand.tags.length === 0 ||
-      inputTech.some((t) => cand.tags.includes(t));
+      inputTech.length === 0 || inputTech.some((t) => cand.tags.includes(t));
 
     if (sim >= autoMergeThreshold && hasTechOverlap) {
       if (sim > bestScore) {

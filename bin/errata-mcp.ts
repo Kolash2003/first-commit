@@ -246,6 +246,40 @@ async function main() {
             required: ['query'],
           },
         },
+        {
+          name: 'get_review_queue',
+          description:
+            'Spaced-repetition cards due for review (v2). Returns ErrorClasses with review_due_date due, ordered by recurrence.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: {
+                type: 'number',
+                description: 'Maximum number of cards to return (default: 10).',
+              },
+            },
+          },
+        },
+        {
+          name: 'submit_review_result',
+          description:
+            'Record recall outcome for a review card (feeds SM-2 scheduling).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              error_class_id: {
+                type: 'string',
+                description: 'The ErrorClass id that was reviewed.',
+              },
+              rating: {
+                type: 'string',
+                enum: ['again', 'hard', 'good', 'easy'],
+                description: 'Recall quality rating.',
+              },
+            },
+            required: ['error_class_id', 'rating'],
+          },
+        },
       ],
     };
   });
@@ -358,6 +392,63 @@ async function main() {
 
         return {
           content: [{ type: 'text', text: JSON.stringify([], null, 2) }],
+        };
+      }
+
+      if (name === 'get_review_queue') {
+        const limitNum = Math.min(100, Math.max(1, Number(args?.limit || 10)));
+        const today = new Date().toISOString().split('T')[0];
+        if (isConfigured()) {
+          const rows = await runCypher<any>(
+            `MATCH (e:ErrorClass)
+             WHERE e.review_due_date IS NULL OR e.review_due_date <= $today
+             OPTIONAL MATCH (e)-[:CAUSED_BY]->(rc:RootCause)
+             OPTIONAL MATCH (e)-[:FIXED_BY]->(fx:Fix)
+             RETURN e.id AS id, e.title AS title,
+                    coalesce(rc.summary, e.root_cause, '') AS rootCause,
+                    coalesce(fx.summary, e.past_fix_summary, '') AS pastFix,
+                    e.occurrence_count AS occurrences
+             ORDER BY e.occurrence_count DESC LIMIT $limit`,
+            { today, limit: limitNum }
+          );
+          return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify([], null, 2) }] };
+      }
+
+      if (name === 'submit_review_result') {
+        const errorClassId = String(args?.error_class_id || '');
+        const rating = String(args?.rating || '');
+        if (!errorClassId || !['again', 'hard', 'good', 'easy'].includes(rating)) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'error_class_id and rating (again/hard/good/easy) required.' }],
+          };
+        }
+        if (!isConfigured()) {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, offline: true }, null, 2) }] };
+        }
+        const existing = await runCypher<any>(
+          `MATCH (e:ErrorClass { id: $id }) RETURN e.ease_factor AS ef, e.current_interval AS iv LIMIT 1`,
+          { id: errorClassId }
+        );
+        let ef = existing[0]?.ef ?? 2.5;
+        let iv = existing[0]?.iv ?? 1;
+        if (rating === 'again') { iv = 1; ef = Math.max(1.3, ef - 0.2); }
+        else if (rating === 'hard') { iv = Math.ceil(iv * 1.2); ef = Math.max(1.3, ef - 0.15); }
+        else if (rating === 'good') { iv = Math.ceil(iv * ef); }
+        else { iv = Math.ceil(iv * ef * 1.3); ef = Math.min(2.5, ef + 0.1); }
+        const nextDue = new Date();
+        nextDue.setDate(nextDue.getDate() + Math.max(1, iv));
+        const dueStr = nextDue.toISOString().split('T')[0];
+        await runCypher(
+          `MATCH (e:ErrorClass { id: $id })
+           SET e.ease_factor = $ef, e.current_interval = $iv,
+               e.review_due_date = $due, e.last_reviewed = $today`,
+          { id: errorClassId, ef: Number(ef.toFixed(2)), iv: Math.max(1, iv), due: dueStr, today: new Date().toISOString().split('T')[0] }
+        );
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ ok: true, nextDue: dueStr, interval: iv, easeFactor: ef }, null, 2) }],
         };
       }
 

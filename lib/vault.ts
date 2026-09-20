@@ -87,13 +87,15 @@ export async function writeVaultDoc(data: VaultDocData): Promise<{ docPath: stri
         .map(
           (occ) =>
             `| ${occ.num} | ${occ.date} | ${occ.project || 'default'} | ${
-              occ.solvedBy === 'User' ? '**Me (Self-Solved)**' : 'AI'
+              occ.solvedBy === 'User' ? '**Me**' : 'AI'
             } |`
         )
         .join('\n')
     : `| 1 | ${data.lastSeen} | default | ${data.selfSolved > 0 ? '**Me**' : 'AI'} |`;
 
   const conceptWikiLinks = data.concepts.map((c) => `[[${slugify(c)}]]`).join(', ');
+  // DESIGN §9: frontmatter carries similar [[wiki-links]] for Obsidian graph.
+  const similarLinks = (data.similar || []).map((s) => `[[${s}]]`).join(', ');
 
   const content = `---
 id: "${data.id}"
@@ -103,7 +105,7 @@ last_seen: "${data.lastSeen}"
 occurrences: ${data.occurrences}
 self_solved: ${data.selfSolved}
 tags: [${data.tags.map((t) => `"${t}"`).join(', ')}]
-concepts: [${conceptWikiLinks}]
+concepts: [${conceptWikiLinks}]${similarLinks ? `\nsimilar: [${similarLinks}]` : ''}
 ---
 
 # ${data.title}

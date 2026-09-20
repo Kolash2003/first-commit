@@ -196,6 +196,7 @@ export async function initNeo4jSchema(): Promise<{ initialized: boolean; logs: s
     'CREATE CONSTRAINT tech_name_unique IF NOT EXISTS FOR (t:Technology) REQUIRE t.name IS UNIQUE',
     'CREATE CONSTRAINT concept_name_unique IF NOT EXISTS FOR (c:Concept) REQUIRE c.name IS UNIQUE',
     'CREATE CONSTRAINT project_name_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.name IS UNIQUE',
+    'CREATE CONSTRAINT docpage_path_unique IF NOT EXISTS FOR (d:DocPage) REQUIRE d.path IS UNIQUE',
     'CREATE INDEX occurrence_timestamp IF NOT EXISTS FOR (o:Occurrence) ON (o.timestamp)',
   ];
 

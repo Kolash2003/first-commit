@@ -46,8 +46,9 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
   const errorClassId = input.matched_error_class_id || generateShortId('ec', norm.fingerprint);
   const occurrenceId = generateShortId('occ', `${errorClassId}_${now}_${Math.random()}`);
 
+  // DESIGN §7.2: embedded text = normalized error + root cause.
   const embedding = await generateEmbedding(
-    `${norm.normalizedMessage} ${input.root_cause} ${input.explanation}`
+    `${norm.normalizedMessage} ${input.root_cause}`
   );
 
   let occurrenceCount = 1;
@@ -57,9 +58,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
   if (norm.errorType && !title.toLowerCase().startsWith(norm.errorType)) {
     title = `${norm.errorType.toUpperCase()}: ${title}`;
   }
-
-  const datePrefix = now.split('T')[0];
-  const docPath = `errors/${datePrefix}-${errorClassId}.md`;
 
   const occurrenceLog: VaultDocData['occurrenceLog'] = [
     {
@@ -109,7 +107,47 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
           solvedBy: occ.user_solved ? 'User' : 'AI',
         });
       }
+    } catch (err) {
+      console.error('Error reading existing ErrorClass:', err);
+    }
+  } else {
+    const existing = inMemoryErrorClasses.get(errorClassId);
+    if (existing) {
+      occurrenceCount = existing.occurrence_count + 1;
+      selfSolvedCount = existing.self_solved_count + (userSolved ? 1 : 0);
+      firstSeen = existing.first_seen;
+      title = existing.title || title;
+    }
+  }
 
+  // DESIGN §9: vault filename is date + slug (errors/2026-07-14-<slug>.md).
+  // The vault is authoritative for doc_path — Neo4j stores what was written.
+  let actualDocPath = '';
+  try {
+    const written = await writeVaultDoc({
+      id: errorClassId,
+      title,
+      firstSeen,
+      lastSeen: now,
+      occurrences: occurrenceCount,
+      selfSolved: selfSolvedCount,
+      tags: techList,
+      concepts: conceptList,
+      explanation: input.explanation,
+      rootCause: input.root_cause,
+      fix: input.fix,
+      diagrams: input.diagrams,
+      occurrenceLog,
+    });
+    actualDocPath = written.docPath;
+  } catch (err) {
+    console.warn('Failed to write vault document:', err);
+    actualDocPath = `errors/${now.split('T')[0]}-${errorClassId}.md`;
+  }
+
+  if (isConfigured()) {
+    try {
+      // DESIGN §8 graph shape, incl. DocPage + DOCUMENTED_IN.
       const cypher = `
         MERGE (e:ErrorClass { id: $id })
         ON CREATE SET
@@ -153,6 +191,10 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
         MERGE (p:Project { name: $project })
         MERGE (o)-[:OCCURRED_IN]->(p)
 
+        MERGE (d:DocPage { path: $doc_path })
+        SET d.updated_at = $now
+        MERGE (e)-[:DOCUMENTED_IN]->(d)
+
         WITH e, o
         UNWIND $technologies AS techName
         MERGE (t:Technology { name: techName })
@@ -178,7 +220,7 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
         self_solved_increment: userSolved ? 1 : 0,
         user_solved: userSolved,
         embedding,
-        doc_path: docPath,
+        doc_path: actualDocPath,
         root_cause: input.root_cause,
         past_fix: input.fix,
         raw_message: input.error_message,
@@ -192,12 +234,6 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
       console.error('Error executing Neo4j capture transaction:', err);
     }
   } else {
-    const existing = inMemoryErrorClasses.get(errorClassId);
-    if (existing) {
-      occurrenceCount = existing.occurrence_count + 1;
-      selfSolvedCount = existing.self_solved_count + (userSolved ? 1 : 0);
-      firstSeen = existing.first_seen;
-    }
     inMemoryErrorClasses.set(errorClassId, {
       id: errorClassId,
       fingerprint: norm.fingerprint,
@@ -211,41 +247,21 @@ export async function logResolution(input: LogResolutionInput): Promise<LogResol
       embedding,
       tags: techList,
       concepts: conceptList,
-      doc_path: docPath,
+      doc_path: actualDocPath,
     });
-  }
-
-  try {
-    await writeVaultDoc({
-      id: errorClassId,
-      title,
-      firstSeen,
-      lastSeen: now,
-      occurrences: occurrenceCount,
-      selfSolved: selfSolvedCount,
-      tags: techList,
-      concepts: conceptList,
-      explanation: input.explanation,
-      rootCause: input.root_cause,
-      fix: input.fix,
-      diagrams: input.diagrams,
-      occurrenceLog,
-    });
-  } catch (err) {
-    console.warn('Failed to write vault document:', err);
   }
 
   const ordinalSuffix = getOrdinal(occurrenceCount);
   const notice =
     occurrenceCount === 1
-      ? `First occurrence captured — doc created at ${docPath}`
+      ? `First occurrence captured — doc created at ${actualDocPath}`
       : `${occurrenceCount}${ordinalSuffix} occurrence recorded — doc updated; knowledge consolidated.`;
 
   return {
     error_class_id: errorClassId,
     title,
     occurrence_count: occurrenceCount,
-    doc_path: docPath,
+    doc_path: actualDocPath,
     notice,
     suggested_review: occurrenceCount >= 3,
   };
